@@ -13,12 +13,21 @@ if (clientPropFile.canRead()) {
 }
 
 ext {
-    if (clientProps.containsKey('ClientId')
+    def envClientId = System.getenv('GH_CLIENT_ID')
+    def envClientSecret = System.getenv('GH_CLIENT_SECRET')
+    if (envClientId && envClientSecret) {
+        // Environment variables: raw value, need to quote for buildConfigField
+        ClientId = '"' + envClientId + '"'
+        ClientSecret = '"' + envClientSecret + '"'
+    } else if (clientProps.containsKey('ClientId')
             && clientProps.containsKey('ClientSecret')) {
+        // Properties file: value may already contain quotes, use directly
         ClientId = clientProps['ClientId']
         ClientSecret = clientProps['ClientSecret']
     } else {
-        println 'client.properties not found or incomplete'
+        ClientId = '""'
+        ClientSecret = '""'
+        println 'WARNING: No OAuth credentials configured (OAuth login will be unavailable)'
     }
 }
 

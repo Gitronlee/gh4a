@@ -23,6 +23,9 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build with Gradle
+        env:
+          GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+          GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
         run: ./gradlew assembleDebug
 
       - name: Upload APK artifact
