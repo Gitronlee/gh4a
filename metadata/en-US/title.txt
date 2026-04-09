@@ -1,1 +1,1 @@
-OctoDroid
+GitHub Client (gh4a)

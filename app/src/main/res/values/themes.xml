@@ -59,14 +59,14 @@
     </style>
 
     <style name="HeaderTheme" parent="Theme.MaterialComponents">
-        <item name="colorPrimary">#ffffff</item>
-        <item name="colorSecondary">#ffffff</item>
-        <item name="colorControlActivated">#ffffff</item>
+        <item name="colorPrimary">#FF914D</item>
+        <item name="colorSecondary">#FF914D</item>
+        <item name="colorControlActivated">#FF914D</item>
         <item name="colorSurface">@android:color/transparent</item>
         <item name="colorOnSurface">#ffffffff</item>
         <item name="android:spinnerStyle">@style/Widget.Spinner.ActionBar.Light</item>
         <!-- used by appcompat to tint the spinner background drawable -->
-        <item name="android:colorBackground">#ffffff</item>
+        <item name="android:colorBackground">#121212</item>
     </style>
 
     <style name="PreferenceTheme" parent="PreferenceThemeOverlay.v14.Material" />

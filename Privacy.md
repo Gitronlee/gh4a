@@ -1,12 +1,12 @@
-OctoDroid Privacy Policy
+gh4a Privacy Policy
 ========================
 
 What information do we collect?
 -------------------------------
-For connecting to GitHub, OctoDroid does not store your user name and/or password.
+For connecting to GitHub, gh4a does not store your user name and/or password.
 Instead, you are asked to log in to GitHub in a browser, which generates a
 (revokable) access token which is then stored on the device.
-Additionally, OctoDroid stores bookmarks you create locally on the device.
+Additionally, gh4a stores bookmarks you create locally on the device.
 
 What do we use your information for?
 ------------------------------------
@@ -22,7 +22,7 @@ described above.
 
 Your consent
 ------------
-By using the app, you consent to this [privacy policy](https://raw.githubusercontent.com/slapperwan/gh4a/master/Privacy.md).
+By using the app, you consent to this [privacy policy](https://github.com/ronlee/gh4a/blob/master/Privacy.md).
 
 
 Changes to our Privacy Policy
@@ -30,5 +30,5 @@ Changes to our Privacy Policy
 If we decide to change our privacy policy, we will publish any related change on
 this page.
 
-This policy document was last modified on 07 Oct 2022.
+This policy document was last modified on 09 Apr 2026.
 

@@ -206,7 +206,7 @@ public class RxUtils {
                         .setDuration(LONG_ERROR_SNACKBAR_DURATION_MS)
                         .setAction(
                             R.string.snackbar_copy_error_log_action,
-                            view -> IntentUtils.copyToClipboard(context, "OctoDroid error", Log.getStackTraceString(error))
+                            view -> IntentUtils.copyToClipboard(context, "gh4a error", Log.getStackTraceString(error))
                         );
                 }
             }

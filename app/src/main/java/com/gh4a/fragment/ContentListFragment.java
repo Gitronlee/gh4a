@@ -173,6 +173,10 @@ public class ContentListFragment extends ListDataBaseFragment<Content> implement
         menu.add(Menu.NONE, R.id.history, Menu.NONE, R.string.history);
         if (contents.type() == ContentType.File && !isSubModule) {
             menu.add(Menu.NONE, R.id.download, Menu.NONE, R.string.download);
+            if (!FileUtils.isBinaryFormat(contents.name()) && !FileUtils.isImage(contents.name())
+                    && com.gh4a.Gh4Application.get().isAuthorized()) {
+                menu.add(Menu.NONE, R.id.edit, Menu.NONE, R.string.edit);
+            }
         }
     }
 
@@ -199,6 +203,11 @@ public class ContentListFragment extends ListDataBaseFragment<Content> implement
                 DownloadUtils.enqueueDownloadWithPermissionCheck(getBaseActivity(),
                         url, FileUtils.getMimeTypeFor(contents.name()),
                         contents.name(), null);
+                return true;
+            case R.id.edit:
+                startActivity(com.gh4a.activities.FileEditActivity.makeIntent(
+                        getActivity(), mRepository.owner().login(),
+                        mRepository.name(), mRef, contents.path()));
                 return true;
         }
 

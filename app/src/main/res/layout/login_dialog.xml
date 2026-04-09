@@ -64,6 +64,15 @@
 
         </com.google.android.material.textfield.TextInputLayout>
 
+        <TextView
+            android:id="@+id/token_permission_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/token_permission_hint"
+            android:textSize="12sp"
+            android:textColor="?android:attr/textColorSecondary" />
+
     </LinearLayout>
 
     <FrameLayout

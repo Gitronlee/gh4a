@@ -96,6 +96,7 @@ public class FileViewerActivity extends WebViewerActivity
 
     private static final int ID_LOADER_FILE = 0;
     private static final int MENU_ITEM_HISTORY = 10;
+    private static final int MENU_ITEM_EDIT = 11;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -220,6 +221,14 @@ public class FileViewerActivity extends WebViewerActivity
         menu.add(0, MENU_ITEM_HISTORY, Menu.NONE, R.string.history)
                 .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
 
+        // Only show edit for text files when user is logged in
+        if (com.gh4a.Gh4Application.get().isAuthorized()
+                && !FileUtils.isBinaryFormat(FileUtils.getFileName(mPath))
+                && !FileUtils.isImage(mPath)) {
+            menu.add(0, MENU_ITEM_EDIT, Menu.NONE, R.string.edit)
+                    .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
+        }
+
         return super.onCreateOptionsMenu(menu);
     }
 
@@ -253,6 +262,9 @@ public class FileViewerActivity extends WebViewerActivity
                 mViewRawText = !mViewRawText;
                 item.setChecked(mViewRawText);
                 onRefresh();
+                return true;
+            case MENU_ITEM_EDIT:
+                startActivity(FileEditActivity.makeIntent(this, mRepoOwner, mRepoName, mRef, mPath));
                 return true;
          }
          return super.onOptionsItemSelected(item);
