@@ -1,4 +1,6 @@
-# MobileGithub - GitHub Android Client
+# MobileGithub - A third-party github client with editing capabilities.
+
+如今vibe coding时代，越来越多的开发者通过手机操作github，急需一个功能强大的github客户端。我在体验gh4a后对其很满意，唯一不足的是它没有编辑能力，因此MobileGithub诞生了！
 
 基于 [slapperwan/gh4a](https://github.com/slapperwan/gh4a)（原 OctoDroid）优化的 GitHub Android 客户端。
 
