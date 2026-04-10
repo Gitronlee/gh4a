@@ -18,6 +18,7 @@ package com.gh4a.activities;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
@@ -49,6 +50,10 @@ import com.meisolsson.githubsdk.model.Content;
 import com.meisolsson.githubsdk.service.repositories.RepositoryBranchService;
 import com.meisolsson.githubsdk.service.repositories.RepositoryContentService;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -98,6 +103,8 @@ public class FileEditActivity extends BaseActivity implements
     private MenuItem mSaveMenuItem;
     private boolean mHasUnsavedChanges = false;
     private List<Branch> mBranches;
+    /** Images inserted by user: key=relative path in repo, value=temp local File */
+    private final java.util.LinkedHashMap<String, File> mInsertedImages = new java.util.LinkedHashMap<>();
 
     private final ActivityResultLauncher<String> mImagePickerLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -300,15 +307,44 @@ public class FileEditActivity extends BaseActivity implements
         String newContentBase64 = StringUtils.toBase64(mEditor.getText().toString());
         String targetBranch = branchName != null ? branchName : mRef;
 
+        // Build list of all files to commit: main text + inserted images
+        List<FileToCommit> filesToCommit = new ArrayList<>();
+
+        // Main text file
+        filesToCommit.add(new FileToCommit(mPath, newContentBase64, null));
+
+        // Inserted image files (base64 encode each)
+        if (!mInsertedImages.isEmpty()) {
+            for (java.util.Map.Entry<String, File> entry : mInsertedImages.entrySet()) {
+                String imagePath = entry.getKey();
+                File imageFile = entry.getValue();
+                try {
+                    InputStream imgIs = new java.io.FileInputStream(imageFile);
+                    byte[] imgBytes = new byte[(int) imageFile.length()];
+                    int totalRead = 0;
+                    while (totalRead < imgBytes.length) {
+                        int read = imgIs.read(imgBytes, totalRead, imgBytes.length - totalRead);
+                        if (read < 0) break;
+                        totalRead += read;
+                    }
+                    imgIs.close();
+                    String imgBase64 = Base64.getEncoder().encodeToString(imgBytes);
+                    filesToCommit.add(new FileToCommit(imagePath, imgBase64, null));
+                } catch (Exception e) {
+                    android.util.Log.e("FileEdit", "Failed to read image: " + imagePath, e);
+                }
+            }
+        }
+
+        final List<FileToCommit> finalFiles = filesToCommit;
+
         Single.<String>create(emitter -> {
             try {
                 // Encode each path segment separately to preserve '/' separators
                 String[] pathSegments = mPath.split("/", -1);
                 StringBuilder encodedPath = new StringBuilder();
                 for (int i = 0; i < pathSegments.length; i++) {
-                    if (i > 0) {
-                        encodedPath.append("/");
-                    }
+                    if (i > 0) encodedPath.append("/");
                     encodedPath.append(URLEncoder.encode(pathSegments[i], StandardCharsets.UTF_8));
                 }
 
@@ -319,8 +355,6 @@ public class FileEditActivity extends BaseActivity implements
                 String token = Gh4Application.get().getAuthToken();
 
                 // Pre-flight: verify token has push permission for this repo.
-                // GitHub's default Fine-grained tokens often lack contents write access,
-                // which causes confusing 404 errors instead of 403.
                 Request.Builder permReqBuilder = new Request.Builder()
                         .url(baseUrl)
                         .get()
@@ -354,8 +388,7 @@ public class FileEditActivity extends BaseActivity implements
                     return;
                 }
 
-                // Re-fetch the current file SHA to ensure it hasn't changed since loading.
-                // This prevents SHA mismatch if the file was modified between load and save.
+                // Re-fetch the current SHA of the main file
                 String getUrl = url + "?ref=" + URLEncoder.encode(targetBranch, StandardCharsets.UTF_8);
                 Request.Builder getRequestBuilder = new Request.Builder()
                         .url(getUrl)
@@ -381,7 +414,6 @@ public class FileEditActivity extends BaseActivity implements
                         android.util.Log.w("FileEdit", "Failed to parse file SHA response", e);
                     }
                 }
-
                 if (TextUtils.isEmpty(currentSha)) {
                     currentSha = mFileSha;
                 } else if (!currentSha.equals(mFileSha)) {
@@ -389,47 +421,113 @@ public class FileEditActivity extends BaseActivity implements
                             "SHA differs from cached value — file may have been updated externally");
                 }
 
-                // PUT request to update file contents via GitHub API.
-                JSONObject jsonBody = new JSONObject();
-                jsonBody.put("message", message);
-                jsonBody.put("content", newContentBase64);
-                jsonBody.put("sha", currentSha);
-                jsonBody.put("branch", targetBranch);
+                // Commit each file via GitHub API
+                int successCount = 0;
+                for (int i = 0; i < finalFiles.size(); i++) {
+                    FileToCommit ftc = finalFiles.get(i);
 
-                RequestBody body = RequestBody.create(
-                        MediaType.parse("application/json"), jsonBody.toString());
+                    // Encode this file's path
+                    String[] fSegments = ftc.path.split("/", -1);
+                    StringBuilder fEncodedPath = new StringBuilder();
+                    for (int j = 0; j < fSegments.length; j++) {
+                        if (j > 0) fEncodedPath.append("/");
+                        fEncodedPath.append(URLEncoder.encode(fSegments[j], StandardCharsets.UTF_8));
+                    }
+                    String fUrl = baseUrl + "/contents/" + fEncodedPath.toString();
 
-                Request.Builder requestBuilder = new Request.Builder()
-                        .url(url)
-                        .put(body)
-                        .addHeader("Accept", "application/vnd.github.v3+json");
-                if (token != null) {
-                    requestBuilder.addHeader("Authorization", "Token " + token);
+                    // For image files that are new (not existing in repo), we need
+                    // their SHA only if they already exist. Try to fetch.
+                    String fileSha = ftc.sha != null ? ftc.sha : null;
+                    if (fileSha == null && !ftc.path.equals(mPath)) {
+                        // New image: check if it exists
+                        String imgGetUrl = fUrl + "?ref=" + URLEncoder.encode(targetBranch, StandardCharsets.UTF_8);
+                        Request.Builder imgGetBuilder = new Request.Builder()
+                                .url(imgGetUrl)
+                                .get()
+                                .addHeader("Accept", "application/vnd.github.v3+json");
+                        if (token != null) {
+                            imgGetBuilder.addHeader("Authorization", "Token " + token);
+                        }
+                        Response imgGetResp = ServiceFactory.getHttpClientBuilder()
+                                .build()
+                                .newCall(imgGetBuilder.build())
+                                .execute();
+                        if (imgGetResp.isSuccessful() && imgGetResp.body() != null) {
+                            try {
+                                JSONObject imgJson = new JSONObject(imgGetResp.body().string());
+                                if (imgJson.has("sha")) {
+                                    fileSha = imgJson.getString("sha");
+                                }
+                            } catch (JSONException ignored) { }
+                        }
+                        // For the first file (main text), use fetched sha
+                        if (ftc.path.equals(mPath)) {
+                            fileSha = currentSha;
+                        }
+                    }
+                    if (ftc.path.equals(mPath)) {
+                        fileSha = currentSha;
+                    }
+
+                    JSONObject jsonBody = new JSONObject();
+                    jsonBody.put("message", message);
+                    jsonBody.put("content", ftc.content);
+                    if (fileSha != null) {
+                        jsonBody.put("sha", fileSha);
+                    }
+                    jsonBody.put("branch", targetBranch);
+
+                    RequestBody body = RequestBody.create(
+                            MediaType.parse("application/json"), jsonBody.toString());
+
+                    Request.Builder requestBuilder = new Request.Builder()
+                            .url(fUrl)
+                            .put(body)
+                            .addHeader("Accept", "application/vnd.github.v3+json");
+                    if (token != null) {
+                        requestBuilder.addHeader("Authorization", "Token " + token);
+                    }
+
+                    Response response = ServiceFactory.getHttpClientBuilder()
+                            .build()
+                            .newCall(requestBuilder.build())
+                            .execute();
+
+                    int code = response.code();
+                    if (response.isSuccessful()) {
+                        successCount++;
+                    } else {
+                        android.util.Log.e("FileEdit",
+                                "Failed to commit " + ftc.path + ": HTTP " + code);
+                        // Don't fail entire operation for non-critical image errors
+                        if (ftc.path.equals(mPath)) {
+                            if (code == HttpURLConnection.HTTP_UNAUTHORIZED
+                                    || code == HttpURLConnection.HTTP_FORBIDDEN) {
+                                emitter.onError(new RuntimeException(
+                                        getString(R.string.file_no_write_permission)));
+                                return;
+                            } else if (code == HttpURLConnection.HTTP_NOT_FOUND) {
+                                emitter.onError(new RuntimeException(
+                                        getString(R.string.file_saving_error)
+                                                + "\n文件未找到，可能是 Token 无写入权限或 SHA 已过期。"));
+                                return;
+                            } else if (code == HttpURLConnection.HTTP_CONFLICT) {
+                                emitter.onError(new RuntimeException(
+                                        getString(R.string.file_conflict_error)));
+                                return;
+                            } else {
+                                emitter.onError(new RuntimeException(
+                                        getString(R.string.file_saving_error) + " (HTTP " + code + ")"));
+                                return;
+                            }
+                        }
+                    }
                 }
 
-                Response response = ServiceFactory.getHttpClientBuilder()
-                        .build()
-                        .newCall(requestBuilder.build())
-                        .execute();
-
-                int code = response.code();
-                if (response.isSuccessful()) {
-                    emitter.onSuccess("OK");
-                } else if (code == HttpURLConnection.HTTP_UNAUTHORIZED
-                        || code == HttpURLConnection.HTTP_FORBIDDEN) {
-                    emitter.onError(new RuntimeException(
-                            getString(R.string.file_no_write_permission)));
-                } else if (code == HttpURLConnection.HTTP_NOT_FOUND) {
-                    emitter.onError(new RuntimeException(
-                            getString(R.string.file_saving_error)
-                                    + "\n文件未找到，可能是 Token 无写入权限或 SHA 已过期。"));
-                } else if (code == HttpURLConnection.HTTP_CONFLICT) {
-                    emitter.onError(new RuntimeException(
-                            getString(R.string.file_conflict_error)));
+                if (successCount > 0) {
+                    emitter.onSuccess("OK (" + successCount + " files)");
                 } else {
-                    String errorMsg = getString(R.string.file_saving_error)
-                            + " (HTTP " + code + ")";
-                    emitter.onError(new RuntimeException(errorMsg));
+                    emitter.onError(new RuntimeException(getString(R.string.file_saving_error)));
                 }
             } catch (Exception e) {
                 emitter.onError(e);
@@ -451,18 +549,63 @@ public class FileEditActivity extends BaseActivity implements
     private void handleSelectedImage(Uri uri) {
         Single.<String>create(emitter -> {
             try {
-                // Limit: compressed output should stay under 500KB base64 (~375KB raw)
-                long maxOutputBytes = 500L * 1024;
+                // Size limit for source image
+                long maxInputBytes = 5L * 1024 * 1024;
 
-                // Read and decode bitmap
-                java.io.InputStream is = getContentResolver().openInputStream(uri);
+                // Get display name from URI
+                String displayName = "image";
+                Cursor cursor = getContentResolver().query(uri,
+                        new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE},
+                        null, null, null);
+                long fileSize = 0;
+                if (cursor != null && cursor.moveToFirst()) {
+                    int nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    int sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE);
+                    if (nameIdx >= 0) displayName = cursor.getString(nameIdx);
+                    if (sizeIdx >= 0) fileSize = cursor.getLong(sizeIdx);
+                    cursor.close();
+                }
+
+                if (fileSize > maxInputBytes) {
+                    emitter.onError(new RuntimeException(getString(R.string.image_too_large)));
+                    return;
+                }
+
+                // Determine target directory: same directory as the file being edited,
+                // with an "assets" subfolder to avoid cluttering the source tree.
+                String fileDir = mPath;
+                int lastSlash = fileDir.lastIndexOf('/');
+                String basePath = lastSlash >= 0 ? fileDir.substring(0, lastSlash + 1) : "";
+                String assetsDir = basePath + "assets/";
+
+                // Build a safe filename (lowercase, no spaces, unique)
+                String safeName = displayName.replaceAll("[^a-zA-Z0-9._-]", "_").toLowerCase();
+                if (!safeName.matches(".*\\.(png|jpg|jpeg|gif|webp|bmp)$")) {
+                    safeName = safeName + ".png";
+                }
+                String repoImagePath = assetsDir + safeName;
+
+                // Ensure uniqueness by appending counter if needed
+                String baseName = safeName;
+                String baseExt = "";
+                int dotIdx = baseName.lastIndexOf('.');
+                if (dotIdx > 0) {
+                    baseExt = baseName.substring(dotIdx);
+                    baseName = baseName.substring(0, dotIdx);
+                }
+                int counter = 1;
+                while (mInsertedImages.containsKey(repoImagePath)) {
+                    repoImagePath = assetsDir + baseName + "_" + counter + baseExt;
+                    counter++;
+                }
+
+                // Read source bytes with compression pipeline
+                InputStream is = getContentResolver().openInputStream(uri);
                 if (is == null) {
                     emitter.onError(new RuntimeException(getString(R.string.image_insert_error)));
                     return;
                 }
 
-                android.graphics.BitmapFactory.Options decodeOpts = new android.graphics.BitmapFactory.Options();
-                decodeOpts.inJustDecodeBounds = true;
                 byte[] headerBytes = new byte[32 * 1024];
                 int headerRead = is.read(headerBytes);
                 is.close();
@@ -471,33 +614,38 @@ public class FileEditActivity extends BaseActivity implements
                     emitter.onError(new RuntimeException(getString(R.string.image_insert_error)));
                     return;
                 }
-                android.graphics.BitmapFactory.decodeByteArray(headerBytes, 0, headerRead, decodeOpts);
+
+                BitmapFactory.Options decodeOpts = new BitmapFactory.Options();
+                decodeOpts.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(headerBytes, 0, headerRead, decodeOpts);
 
                 int originalWidth = decodeOpts.outWidth;
                 int originalHeight = decodeOpts.outHeight;
 
                 if (originalWidth <= 0 || originalHeight <= 0) {
-                    emitter.onError(new RuntimeException(getString(R.string.image_insert_error)));
+                    // Not a decodable image (e.g., SVG); copy raw bytes directly
+                    InputStream rawStream = getContentResolver().openInputStream(uri);
+                    File tempFile = createTempImageFile(safeName);
+                    copyToFile(rawStream, tempFile);
+                    rawStream.close();
+                    mInsertedImages.put(repoImagePath, tempFile);
+                    String markdown = "![" + displayName + "](" + repoImagePath + ")";
+                    emitter.onSuccess(markdown);
                     return;
                 }
 
-                // Calculate sample size to downscale: cap at 800px on longest edge
-                int maxDimension = 800;
+                // Stage 1: inSampleSize downsample
+                int maxDimension = 1600; // Higher than before since we're saving as file now
                 int sampleSize = 1;
                 while (originalWidth / (sampleSize * 2) > maxDimension
                         || originalHeight / (sampleSize * 2) > maxDimension) {
                     sampleSize *= 2;
                 }
 
-                // Decode with sampling
-                android.graphics.BitmapFactory.Options finalDecodeOpts = new android.graphics.BitmapFactory.Options();
-                finalDecodeOpts.inSampleSize = sampleSize;
-                java.io.InputStream fullStream = getContentResolver().openInputStream(uri);
-                if (fullStream == null) {
-                    emitter.onError(new RuntimeException(getString(R.string.image_insert_error)));
-                    return;
-                }
-                android.graphics.Bitmap bitmap = android.graphics.BitmapFactory.decodeStream(fullStream, null, finalDecodeOpts);
+                BitmapFactory.Options finalOpts = new BitmapFactory.Options();
+                finalOpts.inSampleSize = sampleSize;
+                InputStream fullStream = getContentResolver().openInputStream(uri);
+                Bitmap bitmap = BitmapFactory.decodeStream(fullStream, null, finalOpts);
                 fullStream.close();
 
                 if (bitmap == null) {
@@ -505,62 +653,68 @@ public class FileEditActivity extends BaseActivity implements
                     return;
                 }
 
-                // Further scale if still too large after sampling
-                int scaledWidth = bitmap.getWidth();
-                int scaledHeight = bitmap.getHeight();
-                if (scaledWidth > maxDimension || scaledHeight > maxDimension) {
-                    float scale = (float) maxDimension / Math.max(scaledWidth, scaledHeight);
-                    int targetW = Math.round(scaledWidth * scale);
-                    int targetH = Math.round(scaledHeight * scale);
-                    android.graphics.Bitmap scaled = android.graphics.Bitmap.createScaledBitmap(
-                            bitmap, targetW, targetH, true);
+                // Stage 2: Scale down if still too large
+                int w = bitmap.getWidth(), h = bitmap.getHeight();
+                if (w > maxDimension || h > maxDimension) {
+                    float scale = (float) maxDimension / Math.max(w, h);
+                    Bitmap scaled = Bitmap.createScaledBitmap(bitmap,
+                            Math.round(w * scale), Math.round(h * scale), true);
                     bitmap.recycle();
                     bitmap = scaled;
                 }
 
-                // Compress as JPEG with adaptive quality to meet size limit
-                byte[] compressedBytes = null;
-                int quality = 85;
-                while (quality >= 30) {
-                    java.io.ByteArrayOutputStream jpegOut = new java.io.ByteArrayOutputStream();
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, jpegOut);
-                    compressedBytes = jpegOut.toByteArray();
-                    if (compressedBytes.length <= maxOutputBytes || quality <= 30) {
-                        break;
+                // Stage 3: Compress and write to temp file
+                File tempFile = createTempImageFile(safeName);
+                long maxOutputBytes = 1024L * 1024; // 1MB limit for file-based approach
+                boolean written = false;
+
+                // Try PNG first for quality
+                ByteArrayOutputStream pngOut = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, pngOut);
+                byte[] pngBytes = pngOut.toByteArray();
+
+                if (pngBytes.length <= maxOutputBytes) {
+                    FileOutputStream fos = new FileOutputStream(tempFile);
+                    fos.write(pngBytes);
+                    fos.close();
+                    // Fix extension to .png if needed
+                    if (!repoImagePath.endsWith(".png")) {
+                        repoImagePath = repoImagePath.replaceAll("\\.[^.]+$", "") + ".png";
+                        mInsertedImages.remove(repoImagePath);
                     }
-                    quality -= 15;
+                    written = true;
+                } else {
+                    // Fall back to JPEG with adaptive quality
+                    int quality = 90;
+                    while (quality >= 50) {
+                        ByteArrayOutputStream jpegOut = new ByteArrayOutputStream();
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, jpegOut);
+                        byte[] jpegBytes = jpegOut.toByteArray();
+                        if (jpegBytes.length <= maxOutputBytes) {
+                            FileOutputStream fos = new FileOutputStream(tempFile);
+                            fos.write(jpegBytes);
+                            fos.close();
+                            // Fix extension to .jpg
+                            repoImagePath = repoImagePath.replaceAll("\\.[^.]+$", "") + ".jpg";
+                            written = true;
+                            break;
+                        }
+                        quality -= 10;
+                    }
                 }
                 bitmap.recycle();
 
-                if (compressedBytes.length > maxOutputBytes) {
-                    emitter.onError(new RuntimeException(getString(R.string.image_too_large)));
+                if (!written) {
+                    tempFile.delete();
+                    emitter.onError(new RuntimeException(
+                            getString(R.string.image_too_large)));
                     return;
                 }
 
-                String base64 = Base64.getEncoder().encodeToString(compressedBytes);
+                mInsertedImages.put(repoImagePath, tempFile);
+                String markdown = "![" + displayName + "](" + repoImagePath + ")";
+                emitter.onSuccess(markdown);
 
-                // Determine MIME type
-                String mimeType = "image/jpeg";
-
-                // Get display name from URI
-                String displayName = "image";
-                Cursor cursor = getContentResolver().query(uri,
-                        new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null);
-                if (cursor != null && cursor.moveToFirst()) {
-                    int colIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                    if (colIndex >= 0) {
-                        displayName = cursor.getString(colIndex);
-                        int dotIndex = displayName.lastIndexOf('.');
-                        if (dotIndex > 0) {
-                            displayName = displayName.substring(0, dotIndex);
-                        }
-                    }
-                    cursor.close();
-                }
-
-                // Build markdown image tag with data URI
-                String imageMarkdown = "![" + displayName + "](data:" + mimeType + ";base64," + base64 + ")";
-                emitter.onSuccess(imageMarkdown);
             } catch (Exception e) {
                 emitter.onError(e);
             }
@@ -574,8 +728,48 @@ public class FileEditActivity extends BaseActivity implements
                                 : getString(R.string.image_insert_error), error));
     }
 
+    /** Create a temporary file for storing an inserted image */
+    private File createTempImageFile(String name) throws Exception {
+        File cacheDir = new File(getCacheDir(), "edit_images");
+        if (!cacheDir.exists()) cacheDir.mkdirs();
+        // Ensure unique filename in local filesystem
+        String baseName = name.replaceAll("[^a-zA-Z0-9._-]", "_");
+        File file = new File(cacheDir, System.currentTimeMillis() + "_" + baseName);
+        int counter = 1;
+        while (file.exists()) {
+            file = new File(cacheDir, System.currentTimeMillis() + "_" + counter + "_" + baseName);
+            counter++;
+        }
+        return file;
+    }
+
+    /** Copy InputStream contents to a File */
+    private void copyToFile(InputStream is, File file) throws Exception {
+        FileOutputStream fos = new FileOutputStream(file);
+        byte[] buffer = new byte[8192];
+        int len;
+        while ((len = is.read(buffer)) != -1) {
+            fos.write(buffer, 0, len);
+        }
+        fos.close();
+        is.close();
+    }
+
     private void showUnsavedChangesConfirmation() {
         ConfirmationDialogFragment.show(this, getString(R.string.file_unsaved_changes_warning),
                 R.string.ok, false, null, TAG_UNSAVED_CHANGES);
+    }
+
+    /** Holds data for a single file to commit to GitHub */
+    private static class FileToCommit {
+        final String path;      // Repo-relative path
+        final String content;   // Base64-encoded content
+        final String sha;       // Known SHA (null for new files)
+
+        FileToCommit(String path, String content, String sha) {
+            this.path = path;
+            this.content = content;
+            this.sha = sha;
+        }
     }
 }

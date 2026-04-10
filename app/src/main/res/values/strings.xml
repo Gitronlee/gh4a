@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">gh4a</string>
+    <string name="app_name">MobileGitHub</string>
 
     <!-- Common -->
     <string name="introduction">要充分发挥应用功能，请使用下方按钮登录 GitHub。\n\n您也可以通过左侧滑出菜单浏览 GitHub 的部分内容。</string>
