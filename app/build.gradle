@@ -13,9 +13,9 @@ if (clientPropFile.canRead()) {
 }
 
 ext {
-    def envClientId = System.getenv('GH_CLIENT_ID')
-    def envClientSecret = System.getenv('GH_CLIENT_SECRET')
-    if (envClientId && envClientSecret) {
+    def envClientId = System.getenv('GH_CLIENT_ID')?.trim()
+    def envClientSecret = System.getenv('GH_CLIENT_SECRET')?.trim()
+    if (envClientId && !envClientId.isEmpty() && envClientSecret && !envClientSecret.isEmpty()) {
         // Environment variables: raw value, need to quote for buildConfigField
         ClientId = '"' + envClientId + '"'
         ClientSecret = '"' + envClientSecret + '"'
