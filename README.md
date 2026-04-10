@@ -35,6 +35,10 @@ gh4a 是一款功能完善的 GitHub 第三方 Android 客户端，支持：
 
 ## 示例
 
+![3446.jpg](assets/3446.png)
+
+![3447.jpg](assets/3447.png)
+
 ---
 
 ## 开源依赖
