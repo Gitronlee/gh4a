@@ -3,7 +3,7 @@
 基于 [slapperwan/gh4a](https://github.com/slapperwan/gh4a)（原 OctoDroid）优化的 GitHub Android 客户端。
 
 **本版维护者**: ronlee (ronlee@live.cn)
-**代码仓库**: [ronlee/gh4a](https://github.com/ronlee/gh4a)
+**代码仓库**: [Gitronlee/gh4a](https://github.com/Gitronlee/gh4a)
 **上游仓库**: [slapperwan/gh4a](https://github.com/slapperwan/gh4a)
 
 ---
