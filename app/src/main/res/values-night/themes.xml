@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="HeaderTheme" parent="Theme.MaterialComponents">
-        <item name="colorAccent">#FFB366</item>
-        <item name="colorControlActivated">#FFB366</item>
+        <item name="colorAccent">#8B949E</item>
+        <item name="colorControlActivated">#8B949E</item>
     </style>
 
     <style name="CardView.DayNight" parent="CardView.Dark">

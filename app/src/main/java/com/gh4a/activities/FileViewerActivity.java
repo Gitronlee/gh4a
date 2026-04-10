@@ -34,8 +34,10 @@ import android.view.MenuItem;
 import android.view.View;
 
 import com.gh4a.ApiRequestException;
+import com.gh4a.Gh4Application;
 import com.gh4a.R;
 import com.gh4a.ServiceFactory;
+import com.gh4a.fragment.CommitDialogFragment;
 import com.gh4a.utils.ApiHelpers;
 import com.gh4a.utils.DownloadUtils;
 import com.gh4a.utils.FileUtils;
@@ -51,10 +53,19 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import io.reactivex.Single;
+import okhttp3.MediaType;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 public class FileViewerActivity extends WebViewerActivity
-        implements PopupMenu.OnMenuItemClickListener {
+        implements PopupMenu.OnMenuItemClickListener,
+                   CommitDialogFragment.Callback,
+                   com.gh4a.fragment.ConfirmationDialogFragment.Callback {
     public static Intent makeIntent(Context context, String repoOwner, String repoName,
             String ref, String fullPath) {
         return makeIntent(context, repoOwner, repoName, ref, fullPath, -1, -1, null);
@@ -97,6 +108,8 @@ public class FileViewerActivity extends WebViewerActivity
     private static final int ID_LOADER_FILE = 0;
     private static final int MENU_ITEM_HISTORY = 10;
     private static final int MENU_ITEM_EDIT = 11;
+    private static final int MENU_ITEM_DELETE = 12;
+    private static final String TAG_COMMIT_DIALOG = "commit_dialog";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -229,6 +242,12 @@ public class FileViewerActivity extends WebViewerActivity
                     .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
         }
 
+        // Show delete for all files when user is logged in
+        if (com.gh4a.Gh4Application.get().isAuthorized()) {
+            menu.add(0, MENU_ITEM_DELETE, Menu.NONE, R.string.delete)
+                    .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
+        }
+
         return super.onCreateOptionsMenu(menu);
     }
 
@@ -265,6 +284,9 @@ public class FileViewerActivity extends WebViewerActivity
                 return true;
             case MENU_ITEM_EDIT:
                 startActivity(FileEditActivity.makeIntent(this, mRepoOwner, mRepoName, mRef, mPath));
+                return true;
+            case MENU_ITEM_DELETE:
+                showDeleteConfirmation();
                 return true;
          }
          return super.onOptionsItemSelected(item);
@@ -392,5 +414,152 @@ public class FileViewerActivity extends WebViewerActivity
                         setContentShown(true);
                     }
                 }, this::handleLoadFailure);
+    }
+
+    private void showDeleteConfirmation() {
+        com.gh4a.fragment.ConfirmationDialogFragment.show(
+                this,
+                getString(R.string.file_delete_confirm),
+                R.string.delete,
+                android.os.Bundle.EMPTY,
+                "delete_file");
+    }
+
+    @Override
+    public void onCommitConfirmed(String message, String branchName) {
+        doDelete(message, branchName);
+    }
+
+    @Override
+    public void onConfirmed(String tag, android.os.Parcelable data) {
+        if ("delete_file".equals(tag)) {
+            // Load branches and show commit dialog
+            loadBranchesAndShowDeleteDialog();
+        }
+    }
+
+    private void loadBranchesAndShowDeleteDialog() {
+        com.meisolsson.githubsdk.service.repositories.RepositoryBranchService branchService =
+                ServiceFactory.getForFullPagedLists(
+                        com.meisolsson.githubsdk.service.repositories.RepositoryBranchService.class, false);
+
+        com.gh4a.utils.ApiHelpers.PageIterator
+                .toSingle(page -> branchService.getBranches(mRepoOwner, mRepoName, page))
+                .compose(com.gh4a.utils.RxUtils::doInBackground)
+                .compose(com.gh4a.utils.RxUtils.wrapWithProgressDialog(this, R.string.loading_msg))
+                .subscribe(branches -> {
+                    CommitDialogFragment fragment =
+                            CommitDialogFragment.newInstance(branches, mRef);
+                    fragment.show(getSupportFragmentManager(), TAG_COMMIT_DIALOG);
+                }, error -> handleActionFailure(
+                        getString(R.string.file_delete_error), error));
+    }
+
+    private void doDelete(final String message, final String branchName) {
+        Single.<String>create(emitter -> {
+            try {
+                String fileSha = mContent != null ? mContent.sha() : null;
+                if (TextUtils.isEmpty(fileSha)) {
+                    // Re-fetch SHA to ensure we have the latest
+                    String getUrl = "https://api.github.com/repos/"
+                            + mRepoOwner + "/" + mRepoName + "/contents/" + mPath;
+                    if (!TextUtils.isEmpty(branchName)) {
+                        getUrl += "?ref=" + java.net.URLEncoder.encode(branchName, "UTF-8");
+                    } else {
+                        getUrl += "?ref=" + java.net.URLEncoder.encode(mRef, "UTF-8");
+                    }
+                    Request.Builder getRequestBuilder = new Request.Builder()
+                            .url(getUrl)
+                            .get()
+                            .addHeader("Accept", "application/vnd.github.v3+json");
+                    String token = Gh4Application.get().getAuthToken();
+                    if (token != null) {
+                        getRequestBuilder.addHeader("Authorization", "Token " + token);
+                    }
+                    Response getResponse = ServiceFactory.getHttpClientBuilder()
+                            .build().newCall(getRequestBuilder.build()).execute();
+                    if (getResponse.isSuccessful() && getResponse.body() != null) {
+                        JSONObject getContentJson = new JSONObject(getResponse.body().string());
+                        if (getContentJson.has("sha")) {
+                            fileSha = getContentJson.getString("sha");
+                        }
+                    }
+                }
+
+                if (TextUtils.isEmpty(fileSha)) {
+                    emitter.onError(new RuntimeException(getString(R.string.file_delete_error)
+                            + "\n无法获取文件SHA，可能已被删除或无权限。"));
+                    return;
+                }
+
+                // Build API URL for deletion
+                StringBuilder encodedPath = new StringBuilder();
+                for (String segment : mPath.split("/", -1)) {
+                    if (encodedPath.length() > 0) encodedPath.append("/");
+                    encodedPath.append(java.net.URLEncoder.encode(segment, "UTF-8"));
+                }
+                String url = "https://api.github.com/repos/"
+                        + mRepoOwner + "/" + mRepoName + "/contents/" + encodedPath.toString();
+
+                String targetBranch = !TextUtils.isEmpty(branchName) ? branchName : mRef;
+
+                // Build DELETE request body: message + sha + branch
+                JSONObject jsonBody = new JSONObject();
+                jsonBody.put("message", message);
+                jsonBody.put("sha", fileSha);
+                jsonBody.put("branch", targetBranch);
+
+                RequestBody body = RequestBody.create(
+                        MediaType.parse("application/json"), jsonBody.toString());
+
+                Request.Builder requestBuilder = new Request.Builder()
+                        .url(url)
+                        .delete(body)
+                        .addHeader("Accept", "application/vnd.github.v3+json");
+                String token = Gh4Application.get().getAuthToken();
+                if (token != null) {
+                    requestBuilder.addHeader("Authorization", "Token " + token);
+                }
+
+                Response response = ServiceFactory.getHttpClientBuilder()
+                        .build().newCall(requestBuilder.build()).execute();
+
+                if (response.isSuccessful()) {
+                    emitter.onSuccess("DELETED");
+                } else {
+                    int code = response.code();
+                    String errorMsg = response.body() != null ? response.body().string() : "";
+                    if (code == 401 || code == 403) {
+                        emitter.onError(new RuntimeException(getString(R.string.file_no_write_permission)));
+                    } else if (code == 404) {
+                        emitter.onError(new RuntimeException(getString(R.string.file_delete_error)
+                                + "\n文件未找到，可能已被删除。"));
+                    } else if (code == 409) {
+                        emitter.onError(new RuntimeException(getString(R.string.file_conflict_error)));
+                    } else {
+                        try {
+                            JSONObject errJson = new JSONObject(errorMsg);
+                            String ghMessage = errJson.optString("message", "");
+                            emitter.onError(new RuntimeException(
+                                    getString(R.string.file_delete_error) + " (HTTP " + code + ")"
+                                            + (!ghMessage.isEmpty() ? ": " + ghMessage : "")));
+                        } catch (JSONException e) {
+                            emitter.onError(new RuntimeException(
+                                    getString(R.string.file_delete_error) + " (HTTP " + code + ")"));
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                emitter.onError(e);
+            }
+        })
+                .compose(com.gh4a.utils.RxUtils::doInBackground)
+                .compose(com.gh4a.utils.RxUtils.wrapForBackgroundTask(this,
+                        R.string.deleting_msg, getString(R.string.file_delete_error)))
+                .observeOn(io.reactivex.android.schedulers.AndroidSchedulers.mainThread())
+                .subscribe(result -> finish(),
+                           error -> handleActionFailure(
+                                   error.getMessage() != null ? error.getMessage()
+                                           : getString(R.string.file_delete_error), error));
     }
 }

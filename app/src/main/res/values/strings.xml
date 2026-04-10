@@ -660,4 +660,7 @@
     <string name="insert_image">插入图片</string>
     <string name="image_insert_error">插入图片失败</string>
     <string name="image_too_large">图片过大，请选择小于5MB的图片</string>
+    <string name="file_delete_confirm">确定要删除此文件吗？此操作不可撤销。</string>
+    <string name="file_delete_success">文件已删除</string>
+    <string name="file_delete_error">删除文件失败</string>
 </resources>

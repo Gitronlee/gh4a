@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- === ORANGE THEME - LIGHT === -->
-    <color name="primary">#FF914D</color>
-    <color name="primary_dark">#E07830</color>
+    <!-- === CLEAN WHITE THEME - LIGHT === -->
+    <color name="primary">#57606A</color>
+    <color name="primary_dark">#3D444D</color>
     <color name="accent">@color/primary</color>
 
-    <color name="link_text">@color/primary</color>
+    <color name="link_text">#0969DA</color>
 
     <color name="label_fg_dark">#ff000000</color>
     <color name="label_fg_light">#fff3f3f3</color>
@@ -28,15 +28,15 @@
     <color name="pr_draft_button">#848D97</color>
 
     <!-- FAB -->
-    <color name="fab">#E07830</color>
+    <color name="fab">#57606A</color>
 
     <color name="tab_indicator_color">#fff</color>
     <color name="drawer_scrim">#60000000</color>
 
     <color name="scrollbar_thumb">#5d000000</color>
 
-    <color name="nav_header_primary_text">#ffffffff</color>
-    <color name="nav_header_secondary_text">#b3ffffff</color>
+    <color name="nav_header_primary_text">#ff24292F</color>
+    <color name="nav_header_secondary_text">#b357606A</color>
 
     <!-- Diff -->
     <color name="diff_add">#E6FFEC</color>
@@ -53,9 +53,9 @@
     <color name="drawer_background">@color/background_floating_material_light</color>
     <color name="list_background">@android:color/white</color>
     <color name="icon_foreground">#99343434</color>
-    <color name="breadcrumb_background">#FF914D</color>
+    <color name="breadcrumb_background">#F0F2F4</color>
 
     <!-- Brand -->
-    <color name="octodroid">#FF914D</color>
-    <color name="launcher_bg">#FF914D</color>
+    <color name="octodroid">#57606A</color>
+    <color name="launcher_bg">#F0F2F4</color>
 </resources>
